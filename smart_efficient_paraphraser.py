@@ -26,6 +26,20 @@ from difflib import SequenceMatcher
 import glob
 import random
 
+# DDGS imports
+try:
+    from ddgs import DDGS
+    DDGS_AVAILABLE = True
+    print("✅ DuckDuckGo Search (DDGS) imported successfully")
+except ImportError:
+    try:
+        from duckduckgo_search import DDGS
+        DDGS_AVAILABLE = True
+        print("✅ DuckDuckGo Search (legacy) imported successfully")
+    except ImportError:
+        DDGS_AVAILABLE = False
+        print("⚠️  DuckDuckGo Search not available. Install with: pip install ddgs")
+
 # Load environment variables
 try:
     from dotenv import load_dotenv
@@ -67,6 +81,22 @@ class SmartEfficientParaphraser:
         
         # Initialize Indonesian paraphrase patterns
         self._initialize_paraphrase_patterns()
+        
+        # Initialize DDGS search capability
+        self.ddgs_available = DDGS_AVAILABLE
+        if self.ddgs_available:
+            self.ddgs = DDGS()
+            print("🔍 DuckDuckGo Search initialized for content discovery")
+        
+        # Search configuration
+        self.search_config = {
+            'max_results': 5,
+            'region': 'id-id',  # Indonesia region
+            'language': 'id',   # Indonesian language
+            'safesearch': 'moderate',
+            'min_content_length': 100,  # Minimum content length to consider
+            'max_content_length': 2000  # Maximum content length to use
+        }
         
         # Content protection patterns
         self.protection_patterns = {
@@ -112,6 +142,8 @@ class SmartEfficientParaphraser:
             'ai_refinements': 0,
             'total_api_calls': 0,
             'protected_content': 0,
+            'search_queries': 0,
+            'context_enhanced_paraphrases': 0,
             'cost_savings_percent': 0
         }
         
@@ -258,6 +290,183 @@ class SmartEfficientParaphraser:
         
         return False, None
 
+    def search_related_content(self, query, search_type='text'):
+        """Search for related content using DuckDuckGo"""
+        if not self.ddgs_available:
+            print("⚠️  DuckDuckGo Search not available")
+            return []
+        
+        try:
+            print(f"🔍 Searching for: {query[:50]}...")
+            
+            search_results = []
+            
+            if search_type == 'text':
+                # Search for text content
+                results = self.ddgs.text(
+                    query,
+                    region=self.search_config['region'],
+                    safesearch=self.search_config['safesearch'],
+                    max_results=self.search_config['max_results']
+                )
+                
+                for result in results:
+                    if result and 'body' in result and result['body']:
+                        content_length = len(result['body'])
+                        if (self.search_config['min_content_length'] <= content_length <= 
+                            self.search_config['max_content_length']):
+                            
+                            search_results.append({
+                                'title': result.get('title', 'No title'),
+                                'content': result['body'],
+                                'url': result.get('href', ''),
+                                'content_length': content_length,
+                                'relevance_score': self._calculate_relevance(query, result['body'])
+                            })
+            
+            elif search_type == 'news':
+                # Search for news content
+                results = self.ddgs.news(
+                    query,
+                    region=self.search_config['region'],
+                    safesearch=self.search_config['safesearch'],
+                    max_results=self.search_config['max_results']
+                )
+                
+                for result in results:
+                    if result and 'body' in result and result['body']:
+                        content_length = len(result['body'])
+                        if (self.search_config['min_content_length'] <= content_length <= 
+                            self.search_config['max_content_length']):
+                            
+                            search_results.append({
+                                'title': result.get('title', 'No title'),
+                                'content': result['body'],
+                                'url': result.get('url', ''),
+                                'date': result.get('date', ''),
+                                'content_length': content_length,
+                                'relevance_score': self._calculate_relevance(query, result['body'])
+                            })
+            
+            # Sort by relevance score
+            search_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+            
+            print(f"✅ Found {len(search_results)} relevant results")
+            return search_results
+            
+        except Exception as e:
+            print(f"❌ Search error: {e}")
+            return []
+
+    def _calculate_relevance(self, query, content):
+        """Calculate relevance score between query and content"""
+        if not query or not content:
+            return 0
+        
+        query_words = set(re.findall(r'\w+', query.lower()))
+        content_words = set(re.findall(r'\w+', content.lower()))
+        
+        if not query_words or not content_words:
+            return 0
+        
+        # Calculate word overlap
+        overlap = len(query_words.intersection(content_words))
+        relevance = (overlap / len(query_words)) * 100
+        
+        return round(relevance, 2)
+
+    def extract_keywords_from_text(self, text):
+        """Extract key terms from text for searching"""
+        if not text or not text.strip():
+            return []
+        
+        # Remove common stop words in Indonesian
+        stop_words = {
+            'dan', 'atau', 'yang', 'ini', 'itu', 'pada', 'untuk', 'dengan', 'dalam', 'dari', 
+            'ke', 'di', 'adalah', 'akan', 'dapat', 'telah', 'sudah', 'belum', 'masih',
+            'hanya', 'juga', 'tidak', 'bukan', 'ada', 'menjadi', 'membuat', 'seperti'
+        }
+        
+        # Extract words longer than 3 characters
+        words = re.findall(r'\w+', text.lower())
+        keywords = [word for word in words if len(word) > 3 and word not in stop_words]
+        
+        # Count frequency and get most common
+        word_freq = defaultdict(int)
+        for word in keywords:
+            word_freq[word] += 1
+        
+        # Sort by frequency and take top keywords
+        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+        top_keywords = [word for word, freq in sorted_words[:5]]  # Top 5 keywords
+        
+        return top_keywords
+
+    def search_and_analyze_content(self, original_text):
+        """Search for related content and analyze for paraphrasing potential"""
+        if not self.ddgs_available:
+            return None
+        
+        # Extract keywords from original text
+        keywords = self.extract_keywords_from_text(original_text)
+        if not keywords:
+            print("⚠️  No keywords found in text")
+            return None
+        
+        search_query = ' '.join(keywords[:3])  # Use top 3 keywords
+        print(f"🎯 Search query: {search_query}")
+        
+        # Search for content
+        search_results = self.search_related_content(search_query, 'text')
+        self.cost_tracker['search_queries'] += 1
+        
+        if not search_results:
+            print("❌ No search results found")
+            return None
+        
+        # Analyze and select best content for paraphrasing context
+        best_content = self._select_best_content_for_paraphrasing(
+            original_text, 
+            search_results
+        )
+        
+        return best_content
+
+    def _select_best_content_for_paraphrasing(self, original_text, search_results):
+        """Select the best search result for paraphrasing context"""
+        if not search_results:
+            return None
+        
+        scored_results = []
+        
+        for result in search_results:
+            content = result['content']
+            
+            # Calculate various scores
+            relevance = result['relevance_score']
+            length_score = min(100, (len(content) / 500) * 100)  # Prefer moderate length
+            similarity = self.calculate_similarity(original_text, content)
+            
+            # We want high relevance, good length, but not too similar (to avoid plagiarism)
+            final_score = (relevance * 0.5) + (length_score * 0.2) + ((100 - similarity) * 0.3)
+            
+            scored_results.append({
+                'result': result,
+                'score': final_score,
+                'similarity_to_original': similarity
+            })
+        
+        # Sort by score and select best
+        scored_results.sort(key=lambda x: x['score'], reverse=True)
+        best_result = scored_results[0]
+        
+        print(f"📊 Best content selected:")
+        print(f"   Relevance: {best_result['result']['relevance_score']}%")
+        print(f"   Similarity to original: {best_result['similarity_to_original']}%")
+        print(f"   Final score: {round(best_result['score'], 1)}")
+        
+        return best_result['result']
+
     def local_paraphrase(self, text):
         """Enhanced local paraphrasing using comprehensive synonym database"""
         if not text.strip():
@@ -343,6 +552,95 @@ class SmartEfficientParaphraser:
                 break
         
         return paraphrased, changes_count
+
+    def enhanced_local_paraphrase(self, text, search_context=None):
+        """Enhanced local paraphrasing that can use search context for better synonyms"""
+        if not text.strip():
+            return text, 0
+        
+        # Start with standard local paraphrasing
+        paraphrased, changes_count = self.local_paraphrase(text)
+        
+        # If we have search context, try to improve with context-aware synonyms
+        if search_context and search_context.get('content'):
+            context_synonyms = self._extract_context_synonyms(search_context['content'])
+            if context_synonyms:
+                enhanced_paraphrased, additional_changes = self._apply_context_synonyms(
+                    paraphrased, context_synonyms
+                )
+                paraphrased = enhanced_paraphrased
+                changes_count += additional_changes
+                self.cost_tracker['context_enhanced_paraphrases'] += 1
+                print(f"📈 Applied {additional_changes} context-enhanced changes")
+        
+        return paraphrased, changes_count
+
+    def _extract_context_synonyms(self, context_content):
+        """Extract useful synonyms from search context"""
+        if not context_content:
+            return {}
+        
+        # Extract words from context that might serve as alternative expressions
+        context_words = re.findall(r'\w+', context_content.lower())
+        
+        # Filter for meaningful words (length > 3, not common stop words)
+        meaningful_words = [
+            word for word in context_words 
+            if len(word) > 3 and word not in {
+                'dengan', 'untuk', 'dalam', 'adalah', 'yang', 'akan', 'dapat', 'telah',
+                'sudah', 'hanya', 'juga', 'tidak', 'bukan', 'menjadi', 'membuat'
+            }
+        ]
+        
+        # Count frequency and get common context words
+        word_freq = defaultdict(int)
+        for word in meaningful_words:
+            word_freq[word] += 1
+        
+        # Get words that appear frequently (potential good alternatives)
+        context_synonyms = {}
+        for word, freq in word_freq.items():
+            if freq >= 2 and word in self.synonyms:  # Appears multiple times and has synonyms
+                context_synonyms[word] = self.synonyms[word][:3]  # Top 3 synonyms
+        
+        return context_synonyms
+
+    def _apply_context_synonyms(self, text, context_synonyms):
+        """Apply context-aware synonyms to improve paraphrasing"""
+        if not context_synonyms:
+            return text, 0
+        
+        enhanced_text = text
+        changes_count = 0
+        
+        words = enhanced_text.split()
+        new_words = []
+        
+        for word in words:
+            clean_word = re.sub(r'[^\w]', '', word.lower())
+            
+            # Check if word can be replaced with context-aware synonym
+            if clean_word in context_synonyms:
+                context_syns = context_synonyms[clean_word]
+                if context_syns and random.random() < 0.4:  # 40% chance for context synonyms
+                    new_word = random.choice(context_syns)
+                    # Preserve original case
+                    if word.isupper():
+                        new_word = new_word.upper()
+                    elif word.istitle():
+                        new_word = new_word.capitalize()
+                    
+                    # Replace while preserving punctuation
+                    word_with_punct = re.sub(re.escape(clean_word), new_word, word, flags=re.IGNORECASE)
+                    new_words.append(word_with_punct)
+                    changes_count += 1
+                else:
+                    new_words.append(word)
+            else:
+                new_words.append(word)
+        
+        enhanced_text = ' '.join(new_words)
+        return enhanced_text, changes_count
 
     def assess_quality(self, original, paraphrased):
         """Assess quality of paraphrased text to detect if AI refinement needed"""
@@ -489,8 +787,8 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
         
         return round(final_similarity, 2)
 
-    def paraphrase_text(self, text):
-        """Main paraphrasing method with smart AI usage"""
+    def paraphrase_text(self, text, use_search=True):
+        """Main paraphrasing method with smart AI usage and optional search integration"""
         
         # Check if content should be protected
         is_protected, category = self.is_protected_content(text)
@@ -506,8 +804,18 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
                 'status': 'PROTECTED'
             }
         
-        # Step 1: Local paraphrasing
-        local_result, changes_count = self.local_paraphrase(text)
+        # Optional: Search for related content first for context
+        search_context = None
+        if use_search and self.ddgs_available:
+            print(f"🔍 Searching for context: {text[:50]}...")
+            search_context = self.search_and_analyze_content(text)
+            if search_context:
+                print(f"✅ Found contextual information from: {search_context['title'][:30]}...")
+            else:
+                print("ℹ️  No relevant context found, proceeding with standard paraphrasing")
+        
+        # Step 1: Enhanced local paraphrasing (with optional context)
+        local_result, changes_count = self.enhanced_local_paraphrase(text, search_context)
         self.cost_tracker['local_paraphrases'] += 1
         
         # Step 2: Quality assessment
@@ -519,14 +827,16 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
             similarity = self.calculate_similarity(text, local_result)
             self.stats['perfect_local_results'] += 1
             
+            method_used = 'local_with_search_context' if search_context else 'local_only'
             return {
                 'paraphrase': local_result,
                 'original': text,
                 'similarity': similarity,
                 'plagiarism_reduction': 100 - similarity,
-                'method': 'local_only',
+                'method': method_used,
                 'quality_score': quality_score,
                 'changes_made': changes_count,
+                'search_context': search_context['title'] if search_context else None,
                 'status': 'HIGH_QUALITY_LOCAL'
             }
         
@@ -542,23 +852,26 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
             self.stats['ai_refinement_needed'] += 1
             self.stats['quality_improvements'] += (final_quality_score - quality_score)
             
+            method_used = 'local_plus_ai_refinement_with_search' if search_context else 'local_plus_ai_refinement'
             return {
                 'paraphrase': refined_result,
                 'original': text,
                 'similarity': similarity,
                 'plagiarism_reduction': 100 - similarity,
-                'method': 'local_plus_ai_refinement',
+                'method': method_used,
                 'quality_score': final_quality_score,
                 'original_quality_score': quality_score,
                 'quality_issues': quality_issues,
                 'changes_made': changes_count,
+                'search_context': search_context['title'] if search_context else None,
                 'status': 'AI_REFINED'
             }
 
-    def process_document(self, input_path, output_path=None):
+    def process_document(self, input_path, output_path=None, use_search=True):
         """Process entire document with smart efficient paraphrasing"""
         print(f"🎯 Processing document: {input_path}")
-        print("💡 Strategy: Local paraphrase + AI quality check")
+        search_status = "enabled" if use_search and self.ddgs_available else "disabled"
+        print(f"💡 Strategy: Local paraphrase + AI quality check + Search context ({search_status})")
         
         if not os.path.exists(input_path):
             print(f"❌ File not found: {input_path}")
@@ -588,7 +901,7 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
                 
                 print(f"🔄 Processing paragraph {i+1}/{total_paragraphs}")
                 
-                result = self.paraphrase_text(paragraph.text.strip())
+                result = self.paraphrase_text(paragraph.text.strip(), use_search=use_search)
                 results.append(result)
                 
                 # Count method usage
@@ -622,6 +935,8 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
             if total_processed > 0:
                 print(f"   Local only: {local_only_count}/{total_processed} ({round((local_only_count/total_processed)*100, 1)}%)")
                 print(f"   AI refinement: {ai_used_count}/{total_processed} ({round((ai_used_count/total_processed)*100, 1)}%)")
+                print(f"   🔍 Search queries: {self.cost_tracker['search_queries']}")
+                print(f"   📈 Context-enhanced: {self.cost_tracker['context_enhanced_paraphrases']}")
                 print(f"   💰 Cost savings: {self.cost_tracker['cost_savings_percent']}%")
             else:
                 print(f"   No paragraphs processed in this document")
@@ -644,10 +959,11 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
             print(f"❌ Error processing document: {e}")
             return None
 
-    def process_all_documents(self, input_dir="documents", output_dir="completed"):
+    def process_all_documents(self, input_dir="documents", output_dir="completed", use_search=True):
         """Process all documents with efficient strategy"""
         print(f"🚀 Smart Efficient Processing from: {input_dir}")
-        print(f"💡 Strategy: Local first + AI quality check")
+        search_status = "enabled" if use_search and self.ddgs_available else "disabled"
+        print(f"💡 Strategy: Local first + AI quality check + Search context ({search_status})")
         
         os.makedirs(output_dir, exist_ok=True)
         
@@ -675,7 +991,7 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
             ext = Path(doc_path).suffix
             output_path = os.path.join(output_dir, f"{base_name}_efficient{ext}")
             
-            result = self.process_document(doc_path, output_path)
+            result = self.process_document(doc_path, output_path, use_search=use_search)
             
             if result:
                 results.append(result)
@@ -698,6 +1014,8 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
         if total_processed > 0:
             print(f"   Local only: {total_local_only} ({round((total_local_only/total_processed)*100, 1)}%)")
             print(f"   AI refined: {total_ai_refined} ({round((total_ai_refined/total_processed)*100, 1)}%)")
+            print(f"   🔍 Total search queries: {self.cost_tracker['search_queries']}")
+            print(f"   📈 Total context-enhanced: {self.cost_tracker['context_enhanced_paraphrases']}")
             print(f"   💰 Overall cost savings: {round(overall_savings, 1)}%")
         else:
             print("   No paragraphs processed - check document content")
@@ -748,16 +1066,17 @@ HANYA berikan hasil perbaikan tanpa penjelasan tambahan:"""
 def main():
     """Main processing function"""
     try:
-        print("🚀 Smart Efficient Paraphraser System")
-        print("💡 Strategy: Local First + AI Quality Check")
-        print("=" * 50)
+        print("🚀 Smart Efficient Paraphraser System with DDGS")
+        print("💡 Strategy: Search Context + Local First + AI Quality Check")
+        print("=" * 60)
         
         paraphraser = SmartEfficientParaphraser(synonym_file='sinonim.json')
         
-        # Process all documents
+        # Process all documents with search enabled by default
         results = paraphraser.process_all_documents(
             input_dir="documents",
-            output_dir="completed"
+            output_dir="completed",
+            use_search=True  # Enable search by default
         )
         
         if results:
