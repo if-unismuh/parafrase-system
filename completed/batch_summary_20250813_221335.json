@@ -1,0 +1,26 @@
+{
+  "batch_info": {
+    "input_directory": "documents",
+    "output_directory": "completed",
+    "total_documents": 1,
+    "processing_date": "2025-08-13T22:13:35.896770",
+    "total_processing_time": "0:05:10.094735"
+  },
+  "aggregate_statistics": {
+    "total_paragraphs_processed": 27,
+    "total_api_calls": 23,
+    "total_tokens_used": 4770,
+    "total_protected_content": 4,
+    "average_similarity_reduction": 68.62,
+    "average_quality_score": 61.04
+  },
+  "document_results": [
+    {
+      "filename": "SKRIPSI  FAHRISAL FADLI-2.docx",
+      "output_file": "SKRIPSI  FAHRISAL FADLI-2_paraphrased.docx",
+      "paragraphs": 27,
+      "similarity_reduction": 68.62,
+      "quality_score": 61.04
+    }
+  ]
+}

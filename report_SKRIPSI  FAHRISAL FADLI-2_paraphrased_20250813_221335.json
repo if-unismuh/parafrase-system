@@ -1,0 +1,53 @@
+{
+  "processing_info": {
+    "input_file": "documents/SKRIPSI  FAHRISAL FADLI-2.docx",
+    "output_file": "completed/SKRIPSI  FAHRISAL FADLI-2_paraphrased.docx",
+    "processing_time": "0:05:10.094224",
+    "timestamp": "2025-08-13T22:13:35.896277"
+  },
+  "summary": {
+    "total_paragraphs": 27,
+    "protected_content": 4,
+    "successfully_paraphrased": 23,
+    "average_similarity_reduction": 68.62,
+    "average_quality_score": 61.04
+  },
+  "costs": {
+    "total_api_calls": 23,
+    "total_tokens_used": 4770,
+    "total_cost_usd": 0.0,
+    "paragraphs_processed": 23,
+    "protected_content": 4
+  },
+  "protected_items": [
+    {
+      "text": "BAB I PENDAHULUAN \t1",
+      "category": "titles",
+      "pattern": "^BAB\\s+[IVX]+.*"
+    },
+    {
+      "text": "BAB II TINJAUAN PUSTAKA \t6",
+      "category": "titles",
+      "pattern": "^BAB\\s+[IVX]+.*"
+    },
+    {
+      "text": "BAB III METODE PENELITIAN \t29",
+      "category": "titles",
+      "pattern": "^BAB\\s+[IVX]+.*"
+    },
+    {
+      "text": "BAB IV HASIL DAN PEMABAHASAN\t39",
+      "category": "titles",
+      "pattern": "^BAB\\s+[IVX]+.*"
+    }
+  ],
+  "quality_distribution": {
+    "excellent": 3,
+    "good": 20,
+    "fair": 0,
+    "poor": 4,
+    "average": 61.04,
+    "highest": 90.04,
+    "lowest": 0.0
+  }
+}
